@@ -41,7 +41,7 @@ class ScoringMatrix(object):
         self.wildcard_score = wildcard_score
 
         for line in fs:
-            if line[0] == '#' or not line.strip():
+            if line[0] == "#" or not line.strip():
                 continue
 
             if not self.bases:
@@ -287,22 +287,22 @@ class LocalAlignment(object):
 
     @staticmethod
     def dump_matrix(ref, query, matrix, path, show_row=-1, show_col=-1):
-        sys.stdout.write('      -      ')
-        sys.stdout.write('       '.join(ref))
-        sys.stdout.write('\n')
+        sys.stdout.write("      -      ")
+        sys.stdout.write("       ".join(ref))
+        sys.stdout.write("\n")
         for row in range(matrix.rows):
             if row == 0:
-                sys.stdout.write('-')
+                sys.stdout.write("-")
             else:
                 sys.stdout.write(query[row - 1])
 
             for col in range(matrix.cols):
                 if show_row == row and show_col == col:
-                    sys.stdout.write('       *')
+                    sys.stdout.write("       *")
                 else:
-                    sys.stdout.write(' %5s%s%s' % (matrix.get(row, col)[0],
-                                                   matrix.get(row, col)[1], '$' if (row, col) in path else ' '))
-            sys.stdout.write('\n')
+                    sys.stdout.write(" %5s%s%s" % (matrix.get(row, col)[0],
+                                                   matrix.get(row, col)[1], "$" if (row, col) in path else " "))
+            sys.stdout.write("\n")
 
 
 def _reduce_cigar(operations):
@@ -323,14 +323,14 @@ def _reduce_cigar(operations):
 
 
 def _cigar_str(cigar):
-    out = ''
+    out = ""
     for num, op in cigar:
-        out += '%s%s' % (num, op)
+        out += "%s%s" % (num, op)
     return out
 
 
 class Alignment(object):
-    def __init__(self, query, ref, q_pos, r_pos, cigar, score, ref_name='', query_name='', rc=False, globalalign=False,
+    def __init__(self, query, ref, q_pos, r_pos, cigar, score, ref_name="", query_name="", rc=False, globalalign=False,
                  wildcard=None):
         self.query = query
         self.ref = ref
@@ -363,7 +363,7 @@ class Alignment(object):
         j = self.q_pos
 
         for count, op in self.cigar:
-            if op == 'M':
+            if op == "M":
                 q_len += count
                 r_len += count
                 for k in range(count):
@@ -374,11 +374,11 @@ class Alignment(object):
                     i += 1
                     j += 1
 
-            elif op == 'I':
+            elif op == "I":
                 q_len += count
                 j += count
                 self.mismatches += count
-            elif op == 'D':
+            elif op == "D":
                 r_len += count
                 i += count
                 self.mismatches += count
@@ -399,30 +399,30 @@ class Alignment(object):
     def extended_cigar_str(self):
         qpos = 0
         rpos = 0
-        ext_cigar_str = ''
+        ext_cigar_str = ""
         working = []
         for count, op in self.cigar:
-            if op == 'M':
+            if op == "M":
                 for k in range(count):
                     if self.query[self.q_pos + qpos + k] == self.ref[self.r_pos + rpos + k]:
-                        ext_cigar_str += 'M'
+                        ext_cigar_str += "M"
                     else:
-                        ext_cigar_str += 'X'
+                        ext_cigar_str += "X"
                 qpos += count
                 rpos += count
 
-            elif op == 'I':
+            elif op == "I":
                 qpos += count
-                ext_cigar_str += 'I' * count
-            elif op == 'D':
+                ext_cigar_str += "I" * count
+            elif op == "D":
                 rpos += count
-                ext_cigar_str += 'D' * count
+                ext_cigar_str += "D" * count
 
             working = _reduce_cigar(ext_cigar_str)
 
-        out = ''
+        out = ""
         for num, op in working:
-            out += '%s%s' % (num, op)
+            out += "%s%s" % (num, op)
         return out
 
     @property
@@ -433,60 +433,62 @@ class Alignment(object):
         i = self.r_pos
         j = self.q_pos
 
-        q = ''
-        m = ''
-        r = ''
+        q = ""
+        m = ""
+        r = ""
         qlen = 0
         rlen = 0
 
         for count, op in self.cigar:
-            if op == 'M':
+            if op == "M":
                 qlen += count
                 rlen += count
                 for k in range(count):
                     q += self.orig_query[j]
                     r += self.orig_ref[i]
-                    if self.query[j] == self.ref[i] or (self.wildcard and (self.query[j] in self.wildcard or self.ref[i] in self.wildcard)):
-                        m += '|'
+                    if self.query[j] == self.ref[i] \
+                            or (self.wildcard and (self.query[j] in self.wildcard or self.ref[i] in self.wildcard)):
+                        m += "|"
                     else:
-                        m += '.'
+                        m += "."
 
                     i += 1
                     j += 1
-            elif op == 'D':
+            elif op == "D":
                 rlen += count
                 for k in range(count):
-                    q += '-'
+                    q += "-"
                     r += self.orig_ref[i]
-                    m += ' '
+                    m += " "
                     i += 1
-            elif op == 'I':
+            elif op == "I":
                 qlen += count
                 for k in range(count):
                     q += self.orig_query[j]
-                    r += '-'
-                    m += ' '
+                    r += "-"
+                    m += " "
                     j += 1
 
-            elif op == 'N':
-                q += '-//-'
-                r += '-//-'
-                m += '    '
+            elif op == "N":
+                q += "-//-"
+                r += "-//-"
+                m += "    "
 
         if self.q_name:
-            out.write('Query: %s%s (%s nt)\n' % (self.q_name, ' (reverse-compliment)' if self.rc else '', len(self.query)))
+            out.write("Query: %s%s (%s nt)\n"
+                      % (self.q_name, " (reverse-compliment)" if self.rc else "", len(self.query)))
         if self.r_name:
             if self.r_region:
-                out.write('Ref  : %s (%s)\n\n' % (self.r_name, self.r_region))
+                out.write("Ref  : %s (%s)\n\n" % (self.r_name, self.r_region))
             else:
-                out.write('Ref  : %s (%s nt)\n\n' % (self.r_name, len(self.ref)))
+                out.write("Ref  : %s (%s nt)\n\n" % (self.r_name, len(self.ref)))
 
         poslens = [self.q_pos + 1, self.q_end + 1, self.r_pos + self.r_offset + 1, self.r_end + self.r_offset + 1]
         maxlen = max([len(str(x)) for x in poslens])
 
-        q_pre = 'Query: %%%ss ' % maxlen
-        r_pre = 'Ref  : %%%ss ' % maxlen
-        m_pre = ' ' * (8 + maxlen)
+        q_pre = "Query: %%%ss " % maxlen
+        r_pre = "Ref  : %%%ss " % maxlen
+        m_pre = " " * (8 + maxlen)
 
         rpos = self.r_pos
         if not self.rc:
@@ -498,7 +500,7 @@ class Alignment(object):
             if not self.rc:
                 out.write(q_pre % (qpos + 1))  # pos is displayed as 1-based
             else:
-                out.write(q_pre % (qpos))  # revcomp is 1-based on the 3' end
+                out.write(q_pre % qpos)  # revcomp is 1-based on the 3' end
 
             if wrap:
                 qfragment = q[:wrap]
@@ -513,34 +515,34 @@ class Alignment(object):
                 mfragment = m
                 rfragment = r
 
-                q = ''
-                m = ''
-                r = ''
+                q = ""
+                m = ""
+                r = ""
 
             out.write(qfragment)
             if not self.rc:
                 for base in qfragment:
-                    if base != '-':
+                    if base != "-":
                         qpos += 1
             else:
                 for base in qfragment:
-                    if base != '-':
+                    if base != "-":
                         qpos -= 1
 
             if not self.rc:
-                out.write(' %s\n' % qpos)
+                out.write(" %s\n" % qpos)
             else:
-                out.write(' %s\n' % (qpos + 1))
+                out.write(" %s\n" % (qpos + 1))
 
             out.write(m_pre)
             out.write(mfragment)
-            out.write('\n')
+            out.write("\n")
             out.write(r_pre % (rpos + self.r_offset + 1))
             out.write(rfragment)
             for base in rfragment:
-                if base != '-':
+                if base != "-":
                     rpos += 1
-            out.write(' %s\n\n' % (rpos + self.r_offset))
+            out.write(" %s\n\n" % (rpos + self.r_offset))
 
         out.write("Score: %s\n" % self.score)
         out.write("Matches: %s (%.1f%%)\n" % (self.matches, self.identity * 100))
@@ -550,43 +552,43 @@ class Alignment(object):
 
 def fasta_gen(fname):
     def gen():
-        seq = ''
-        name = ''
-        comments = ''
+        seq = ""
+        name = ""
+        comments = ""
 
-        if fname == '-':
+        if fname == "-":
             f = sys.stdin
-            name = 'stdin'
+            name = "stdin"
         else:
             f = open(fname)
 
         for line in f:
-            if line[0] == '>':
+            if line[0] == ">":
                 if name and seq:
-                    yield (name, seq, comments)
+                    yield name, seq, comments
 
-                spl = line[1:].strip().split(' ', 1)
+                spl = line[1:].strip().split(" ", 1)
                 name = spl[0]
                 if len(spl) > 1:
                     comments = spl[1]
                 else:
-                    comments = ''
+                    comments = ""
 
-                seq = ''
+                seq = ""
             else:
                 seq += line.strip()
 
         if name and seq:
-            yield (name, seq, comments)
+            yield name, seq, comments
 
-        if fname != '-':
+        if fname != "-":
             f.close()
     return gen
 
 
 def seq_gen(name, seq):
     def gen():
-        yield (name, seq, '')
+        yield name, seq, ""
 
     return gen
 
@@ -598,14 +600,14 @@ def extract_region(comments):
     # end_offset = 0
 
     try:
-        attrs = comments.split(' ')
+        attrs = comments.split(" ")
         for attr in attrs:
-            if '=' in attr:
-                k, v = attr.split('=')
-                if k == 'range':
-                    spl = v.split(':')
+            if "=" in attr:
+                k, v = attr.split("=")
+                if k == "range":
+                    spl = v.split(":")
                     ref = spl[0]
-                    start, end = [int(x) for x in spl[1].split('-')]
+                    start, end = [int(x) for x in spl[1].split("-")]
                 # elif k == "5'pad":
                 #     start_offset = int(v)
                 # elif k == "3'pad":
@@ -614,13 +616,13 @@ def extract_region(comments):
         pass
 
     if ref and start:
-        return (ref, start - 1, '%s:%s-%s' % (ref, start, end))
+        return ref, start - 1, "%s:%s-%s" % (ref, start, end)
 
     return None
 
 
 __revcomp = {}
-for a, b in zip('atcgATCGNn', 'tagcTAGCNn'):
+for a, b in zip("atcgATCGNn", "tagcTAGCNn"):
     __revcomp[a] = b
 __cache = {}
 
@@ -633,10 +635,5 @@ def revcomp(seq):
     for s in seq.upper()[::-1]:
         ret.append(__revcomp[s])
 
-    __cache[seq] = ''.join(ret)
+    __cache[seq] = "".join(ret)
     return __cache[seq]
-
-
-#     sw.align('ACACACTA','AGCACACA').dump()
-#     aln=sw.align("AAGGGGAGGACGATGCGGATGTTC","AGGGAGGACGATGCGG")
-#     aln.dump()
