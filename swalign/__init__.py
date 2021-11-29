@@ -114,7 +114,7 @@ def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_
            globalalign, wildcard, full_query):
     n_rows, n_cols = len(query) + 1, len(ref) + 1
     matrix_0 = np.zeros((n_rows, n_cols), dtype=np.int64)
-    matrix_1 = np.full((n_rows, n_cols), fill_value=0, dtype=np.int8)
+    matrix_1 = np.zeros((n_rows, n_cols), dtype=np.int8)
     matrix_2 = np.zeros((n_rows, n_cols), dtype=np.int64)
     for row in range(1, n_rows):
         matrix_0[row, 0] = 0
@@ -155,11 +155,10 @@ def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_
                 if not matrix_0[row, col - 1]:
                     # no penalty to start the alignment
                     del_val = 0
+                elif not gap_extension_decay:
+                    del_val = matrix_0[row, col - 1] + gap_extension_penalty
                 else:
-                    if not gap_extension_decay:
-                        del_val = matrix_0[row, col] + gap_extension_penalty
-                    else:
-                        del_val = matrix_0[row, col - 1] + min(0, gap_extension_penalty + del_run * gap_extension_decay)
+                    del_val = matrix_0[row, col - 1] + min(0, gap_extension_penalty + del_run * gap_extension_decay)
 
             else:
                 del_val = matrix_0[row, col - 1] + gap_penalty
