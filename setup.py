@@ -13,6 +13,5 @@ setup(name='swalign',
       url='http://github.com/mbreese/swalign/',
       packages=['swalign'],
       scripts=['bin/swalign'],
-      python_requires='>=3.1',
-
-     )
+      install_requires=["numpy", "numba"],
+      python_requires='>=3.6')

@@ -1,13 +1,16 @@
 #!/usr/bin/env python
-'''
+"""
 Simple Smith-Waterman aligner
-'''
+"""
 import sys
 from io import StringIO
 
+import numpy as np
+import numba as nb
+
 
 class ScoringMatrix(object):
-    '''
+    """
     Read scoring matrix from a file or string
 
     Matrix should be space-delimited in a format like:
@@ -20,7 +23,8 @@ class ScoringMatrix(object):
 
     Rows and Columns must be in the same order
 
-    '''
+    """
+
     def __init__(self, filename=None, text=None, wildcard_score=0):
         assert filename or text
 
@@ -74,6 +78,7 @@ class IdentityScoringMatrix(object):
             return self.match
         return self.mismatch
 
+
 NucleotideScoringMatrix = IdentityScoringMatrix
 
 
@@ -90,8 +95,157 @@ class Matrix(object):
         self.values[(row * self.cols) + col] = val
 
 
+@nb.njit
+def _score(match, mismatch, one, two, wildcard=None):
+    if (wildcard is not None) and (one in wildcard or two in wildcard):
+        return match
+
+    if one == two:
+        return match
+    return mismatch
+
+
+@nb.njit
+def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_extension_decay, wildcard, globalalign,
+           full_query, prefer_gap_runs):
+    n_rows, n_cols = len(query) + 1, len(ref) + 1
+
+    matrix_0 = np.zeros((n_rows, n_cols), dtype=np.int64)
+    matrix_1 = np.full((n_rows, n_cols), fill_value=" ")
+    matrix_2 = np.zeros((n_rows, n_cols), dtype=np.int64)
+    for row in range(1, n_rows):
+        matrix_0[row, 0] = 0
+        matrix_1[row, 0] = "i"
+        matrix_2[row, 0] = 0
+
+    for col in range(1, n_cols):
+        matrix_0[0, col] = 0
+        matrix_1[0, col] = "d"
+        matrix_2[0, col] = 0
+
+    max_val = 0
+    max_row = 0
+    max_col = 0
+
+    # calculate matrix
+    for row in range(1, n_rows):
+        for col in range(1, n_cols):
+            mm_val = matrix_0[row - 1, col - 1] + _score(match, mismatch, query[row - 1], ref[col - 1], wildcard)
+
+            ins_run = 0
+            del_run = 0
+
+            if matrix_1[row - 1, col] == "i":
+                ins_run = matrix_2[row - 1, col]
+                if not matrix_0[row - 1, col]:
+                    # no penalty to start the alignment
+                    ins_val = 0
+                else:
+                    if not gap_extension_decay:
+                        ins_val = matrix_0[row - 1, col] + gap_extension_penalty
+                    else:
+                        ins_val = matrix_0[row - 1, col] + min(0, gap_extension_penalty + ins_run * gap_extension_decay)
+            else:
+                ins_val = matrix_0[row - 1, col] + gap_penalty
+
+            if matrix_1[row, col - 1] == 'd':
+                del_run = matrix_2[row, col - 1]
+                if not matrix_0[row, col - 1]:
+                    # no penalty to start the alignment
+                    del_val = 0
+                else:
+                    if not gap_extension_decay:
+                        del_val = matrix_0[row, col] + gap_extension_penalty
+                    else:
+                        del_val = matrix_0[row, col - 1] + min(0, gap_extension_penalty + del_run * gap_extension_decay)
+
+            else:
+                del_val = matrix_0[row, col - 1] + gap_penalty
+
+            if globalalign or full_query:
+                cell_val = max(mm_val, del_val, ins_val)
+            else:
+                cell_val = max(mm_val, del_val, ins_val, 0)
+
+            if not prefer_gap_runs:
+                ins_run = 0
+                del_run = 0
+
+            if del_run and cell_val == del_val:
+                val_0, val_1, val_2 = cell_val, "d", del_run + 1
+            elif ins_run and cell_val == ins_val:
+                val_0, val_1, val_2 = cell_val, "i", ins_run + 1
+            elif cell_val == mm_val:
+                val_0, val_1, val_2 = cell_val, "m", 0
+            elif cell_val == del_val:
+                val_0, val_1, val_2 = cell_val, "d", 1
+            elif cell_val == ins_val:
+                val_0, val_1, val_2 = cell_val, "i", 1
+            else:
+                val_0, val_1, val_2 = 0, "x", 0
+
+            if val_0 >= max_val:
+                max_val = val_0
+                max_row = row
+                max_col = col
+
+            matrix_0[row, col] = val_0
+            matrix_1[row, col] = val_1
+            matrix_2[row, col] = val_2
+
+    # backtrack
+    if globalalign:
+        # backtrack from last cell
+        row = n_rows - 1
+        col = n_cols - 1
+    elif full_query:
+        # backtrack from max in last row
+        row = n_rows - 1
+        max_val = 0
+        for c in range(1, n_cols):
+            if matrix_0[row, c] > max_val:
+                max_val = matrix_0[row, c]
+        col = n_cols - 1
+    else:
+        # backtrack from max
+        row = max_row
+        col = max_col
+
+    aln = []
+    path = []
+    while True:
+        val, op = matrix_0[row, col], matrix_1[row, col]
+
+        if globalalign:
+            if (not row) and (not col):
+                break
+        elif full_query:
+            if not row:
+                break
+        elif val <= 0:
+            break
+
+        path.append((row, col))
+        aln.append(op)
+
+        if op == "m":
+            row -= 1
+            col -= 1
+        elif op == "i":
+            row -= 1
+        elif op == "d":
+            col -= 1
+        else:
+            break
+
+    aln = aln[::-1]
+
+    return aln, row, col, max_row, max_col, max_val, path, matrix_0, matrix_1, matrix_2
+
+
 class LocalAlignment(object):
-    def __init__(self, scoring_matrix, gap_penalty=-1, gap_extension_penalty=-1, gap_extension_decay=0.0, prefer_gap_runs=True, verbose=False, globalalign=False, wildcard=None, full_query=False):
+    def __init__(self, scoring_matrix, gap_penalty=-1, gap_extension_penalty=-1, gap_extension_decay=0.0,
+                 prefer_gap_runs=True, verbose=False, globalalign=False, wildcard=None, full_query=False):
         self.scoring_matrix = scoring_matrix
         self.gap_penalty = gap_penalty
         self.gap_extension_penalty = gap_extension_penalty
@@ -109,145 +263,28 @@ class LocalAlignment(object):
         ref = ref.upper()
         query = query.upper()
 
-        matrix = Matrix(len(query) + 1, len(ref) + 1, (0, ' ', 0))
-        for row in range(1, matrix.rows):
-            matrix.set(row, 0, (0, 'i', 0))
-
-        for col in range(1, matrix.cols):
-            matrix.set(0, col, (0, 'd', 0))
-
-        max_val = 0
-        max_row = 0
-        max_col = 0
-
-        # calculate matrix
-        for row in range(1, matrix.rows):
-            for col in range(1, matrix.cols):
-                mm_val = matrix.get(row - 1, col - 1)[0] + self.scoring_matrix.score(query[row - 1], ref[col - 1], self.wildcard)
-
-                ins_run = 0
-                del_run = 0
-
-                if matrix.get(row - 1, col)[1] == 'i':
-                    ins_run = matrix.get(row - 1, col)[2]
-                    if matrix.get(row - 1, col)[0] == 0:
-                        # no penalty to start the alignment
-                        ins_val = 0
-                    else:
-                        if not self.gap_extension_decay:
-                            ins_val = matrix.get(row - 1, col)[0] + self.gap_extension_penalty
-                        else:
-                            ins_val = matrix.get(row - 1, col)[0] + min(0, self.gap_extension_penalty + ins_run * self.gap_extension_decay)
-                else:
-                    ins_val = matrix.get(row - 1, col)[0] + self.gap_penalty
-
-                if matrix.get(row, col - 1)[1] == 'd':
-                    del_run = matrix.get(row, col - 1)[2]
-                    if matrix.get(row, col - 1)[0] == 0:
-                        # no penalty to start the alignment
-                        del_val = 0
-                    else:
-                        if not self.gap_extension_decay:
-                            del_val = matrix.get(row, col - 1)[0] + self.gap_extension_penalty
-                        else:
-                            del_val = matrix.get(row, col - 1)[0] + min(0, self.gap_extension_penalty + del_run * self.gap_extension_decay)
-
-                else:
-                    del_val = matrix.get(row, col - 1)[0] + self.gap_penalty
-
-                if self.globalalign or self.full_query:
-                    cell_val = max(mm_val, del_val, ins_val)
-                else:
-                    cell_val = max(mm_val, del_val, ins_val, 0)
-
-                if not self.prefer_gap_runs:
-                    ins_run = 0
-                    del_run = 0
-
-                if del_run and cell_val == del_val:
-                    val = (cell_val, 'd', del_run + 1)
-                elif ins_run and cell_val == ins_val:
-                    val = (cell_val, 'i', ins_run + 1)
-                elif cell_val == mm_val:
-                    val = (cell_val, 'm', 0)
-                elif cell_val == del_val:
-                    val = (cell_val, 'd', 1)
-                elif cell_val == ins_val:
-                    val = (cell_val, 'i', 1)
-                else:
-                    val = (0, 'x', 0)
-
-                if val[0] >= max_val:
-                    max_val = val[0]
-                    max_row = row
-                    max_col = col
-
-                matrix.set(row, col, val)
-
-        # backtrack
-        if self.globalalign:
-            # backtrack from last cell
-            row = matrix.rows - 1
-            col = matrix.cols - 1
-            val = matrix.get(row, col)[0]
-        elif self.full_query:
-            # backtrack from max in last row
-            row = matrix.rows - 1
-            max_val = 0
-            col = 0
-            for c in range(1, matrix.cols):
-                if matrix.get(row, c)[0] > max_val:
-                    col = c
-                    max_val = matrix.get(row, c)[0]
-            col = matrix.cols - 1
-            val = matrix.get(row, col)[0]
-        else:
-            # backtrack from max
-            row = max_row
-            col = max_col
-            val = max_val
-
-        op = ''
-        aln = []
-
-        path = []
-        while True:
-            val, op, runlen = matrix.get(row, col)
-
-            if self.globalalign:
-                if row == 0 and col == 0:
-                    break
-            elif self.full_query:
-                if row == 0:
-                    break
-            else:
-                if val <= 0:
-                    break
-
-            path.append((row, col))
-            aln.append(op)
-
-            if op == 'm':
-                row -= 1
-                col -= 1
-            elif op == 'i':
-                row -= 1
-            elif op == 'd':
-                col -= 1
-            else:
-                break
-
-        aln.reverse()
+        aln, row, col, max_row, max_col, max_val, path, matrix_0, matrix_1, matrix_2 = _align(
+            ref, query, self.scoring_matrix.match, self.scoring_matrix.mismatch, self.gap_penalty,
+            self.gap_extension_penalty, self.gap_extension_decay, self.prefer_gap_runs, self.globalalign, self.wildcard,
+            self.full_query
+            )
 
         if self.verbose:
+            n_rows, n_cols = len(query) + 1, len(ref) + 1
+            matrix = Matrix(n_rows, n_cols)
+            for row in range(n_rows):
+                for col in range(n_cols):
+                    matrix.set(row, col, (matrix_0[row, col], matrix_1[row, col], matrix_2[row, col]))
             self.dump_matrix(ref, query, matrix, path)
             print(aln)
             print((max_row, max_col), max_val)
 
         cigar = _reduce_cigar(aln)
-        return Alignment(orig_query, orig_ref, row, col, cigar, max_val, ref_name, query_name, rc, self.globalalign, self.wildcard)
+        return Alignment(orig_query, orig_ref, row, col, cigar, max_val, ref_name, query_name, rc, self.globalalign,
+                         self.wildcard)
 
-    def dump_matrix(self, ref, query, matrix, path, show_row=-1, show_col=-1):
+    @staticmethod
+    def dump_matrix(ref, query, matrix, path, show_row=-1, show_col=-1):
         sys.stdout.write('      -      ')
         sys.stdout.write('       '.join(ref))
         sys.stdout.write('\n')
@@ -261,7 +298,8 @@ class LocalAlignment(object):
                 if show_row == row and show_col == col:
                     sys.stdout.write('       *')
                 else:
-                    sys.stdout.write(' %5s%s%s' % (matrix.get(row, col)[0], matrix.get(row, col)[1], '$' if (row, col) in path else ' '))
+                    sys.stdout.write(' %5s%s%s' % (matrix.get(row, col)[0],
+                                                   matrix.get(row, col)[1], '$' if (row, col) in path else ' '))
             sys.stdout.write('\n')
 
 
@@ -290,7 +328,8 @@ def _cigar_str(cigar):
 
 
 class Alignment(object):
-    def __init__(self, query, ref, q_pos, r_pos, cigar, score, ref_name='', query_name='', rc=False, globalalign=False, wildcard=None):
+    def __init__(self, query, ref, q_pos, r_pos, cigar, score, ref_name='', query_name='', rc=False, globalalign=False,
+                 wildcard=None):
         self.query = query
         self.ref = ref
         self.q_pos = q_pos
