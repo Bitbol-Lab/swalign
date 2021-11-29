@@ -9,6 +9,9 @@ import numpy as np
 import numba as nb
 
 
+CHARS = [" ", "i", "d", "m", "x"]
+
+
 class ScoringMatrix(object):
     """
     Read scoring matrix from a file or string
@@ -97,8 +100,9 @@ class Matrix(object):
 
 @nb.njit
 def _score(match, mismatch, one, two, wildcard=None):
-    if (wildcard is not None) and (one in wildcard or two in wildcard):
-        return match
+    if wildcard is not None:
+        if (one in wildcard) or (two in wildcard):
+            return match
 
     if one == two:
         return match
@@ -106,21 +110,19 @@ def _score(match, mismatch, one, two, wildcard=None):
 
 
 @nb.njit
-def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_extension_decay, wildcard, globalalign,
-           full_query, prefer_gap_runs):
+def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_extension_decay, prefer_gap_runs,
+           globalalign, wildcard, full_query):
     n_rows, n_cols = len(query) + 1, len(ref) + 1
-
     matrix_0 = np.zeros((n_rows, n_cols), dtype=np.int64)
-    matrix_1 = np.full((n_rows, n_cols), fill_value=" ")
+    matrix_1 = np.full((n_rows, n_cols), fill_value=0, dtype=np.int8)
     matrix_2 = np.zeros((n_rows, n_cols), dtype=np.int64)
     for row in range(1, n_rows):
         matrix_0[row, 0] = 0
-        matrix_1[row, 0] = "i"
+        matrix_1[row, 0] = 1
         matrix_2[row, 0] = 0
-
     for col in range(1, n_cols):
         matrix_0[0, col] = 0
-        matrix_1[0, col] = "d"
+        matrix_1[0, col] = 2
         matrix_2[0, col] = 0
 
     max_val = 0
@@ -135,7 +137,7 @@ def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_
             ins_run = 0
             del_run = 0
 
-            if matrix_1[row - 1, col] == "i":
+            if matrix_1[row - 1, col] == 1:
                 ins_run = matrix_2[row - 1, col]
                 if not matrix_0[row - 1, col]:
                     # no penalty to start the alignment
@@ -148,7 +150,7 @@ def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_
             else:
                 ins_val = matrix_0[row - 1, col] + gap_penalty
 
-            if matrix_1[row, col - 1] == 'd':
+            if matrix_1[row, col - 1] == 2:
                 del_run = matrix_2[row, col - 1]
                 if not matrix_0[row, col - 1]:
                     # no penalty to start the alignment
@@ -171,18 +173,18 @@ def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_
                 ins_run = 0
                 del_run = 0
 
-            if del_run and cell_val == del_val:
-                val_0, val_1, val_2 = cell_val, "d", del_run + 1
-            elif ins_run and cell_val == ins_val:
-                val_0, val_1, val_2 = cell_val, "i", ins_run + 1
+            if del_run and (cell_val == del_val):
+                val_0, val_1, val_2 = cell_val, 2, del_run + 1
+            elif ins_run and (cell_val == ins_val):
+                val_0, val_1, val_2 = cell_val, 1, ins_run + 1
             elif cell_val == mm_val:
-                val_0, val_1, val_2 = cell_val, "m", 0
+                val_0, val_1, val_2 = cell_val, 3, 0
             elif cell_val == del_val:
-                val_0, val_1, val_2 = cell_val, "d", 1
+                val_0, val_1, val_2 = cell_val, 2, 1
             elif cell_val == ins_val:
-                val_0, val_1, val_2 = cell_val, "i", 1
+                val_0, val_1, val_2 = cell_val, 1, 1
             else:
-                val_0, val_1, val_2 = 0, "x", 0
+                val_0, val_1, val_2 = 0, 4, 0
 
             if val_0 >= max_val:
                 max_val = val_0
@@ -228,12 +230,12 @@ def _align(ref, query, match, mismatch, gap_penalty, gap_extension_penalty, gap_
         path.append((row, col))
         aln.append(op)
 
-        if op == "m":
+        if op == 3:
             row -= 1
             col -= 1
-        elif op == "i":
+        elif op == 1:
             row -= 1
-        elif op == "d":
+        elif op == 2:
             col -= 1
         else:
             break
@@ -256,7 +258,7 @@ class LocalAlignment(object):
         self.wildcard = wildcard
         self.full_query = full_query
 
-    def align(self, ref, query, ref_name='', query_name='', rc=False):
+    def align(self, ref, query, ref_name="", query_name="", rc=False):
         orig_ref = ref
         orig_query = query
 
@@ -274,12 +276,12 @@ class LocalAlignment(object):
             matrix = Matrix(n_rows, n_cols)
             for row in range(n_rows):
                 for col in range(n_cols):
-                    matrix.set(row, col, (matrix_0[row, col], matrix_1[row, col], matrix_2[row, col]))
+                    matrix.set(row, col, (matrix_0[row, col], CHARS[matrix_1[row, col]], matrix_2[row, col]))
             self.dump_matrix(ref, query, matrix, path)
             print(aln)
             print((max_row, max_col), max_val)
 
-        cigar = _reduce_cigar(aln)
+        cigar = _reduce_cigar([CHARS[x] for x in aln])
         return Alignment(orig_query, orig_ref, row, col, cigar, max_val, ref_name, query_name, rc, self.globalalign,
                          self.wildcard)
 
